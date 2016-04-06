@@ -87,18 +87,29 @@ void sr_handlepacket(struct sr_instance* sr,
         * TO THE TABLE.  IF IN THE TABLE SEND CORRESPONDING MAC, RESET TTL
         * OPTIONALLY ADD SENDER TO TABLE
         */
+        printf("ARP Packet\n");
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
-        if(a_hdr->ar_op == ARP_REQUEST)
+        printf("%d\n", ntohs(a_hdr->ar_op));
+        if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
+            printf("Arp request\n");
             struct sr_if* iface = sr_get_interface(sr, interface);
             if(iface)//Found
             {
-                //sr_send_packet(sr, packet, len, iface);
+                printf("iface found\n");
+                struct sr_arphdr reply;
+                reply.ar_op = 2;
+                reply.ar_sip = iface->ip;//sender ip(us)
+                reply.ar_tip = a_hdr->ar_sip;//target ip(from a_hdr)
+                //reply.ar_tha = a_hdr->ar_sha;//target hardware address(a_hdr)
+                //reply.ar_sha = //sender hardware address(us)
+                //reply.ar_hrd//hardware address format Ethernet?
+                //reply.ar_pro//protocal address format IP?
+                //reply.ar_hln//length of hardware address Ethernet?
+                //reply.ar_sln//length of protocal address IP?
+                //sr_send_packet(sr, &reply, sizeof(reply), interface);
             }
-            else//Not Found
-            {
-                //Forward?
-            }
+            
         }
         
 
