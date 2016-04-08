@@ -99,14 +99,14 @@ void sr_handlepacket(struct sr_instance* sr,
                 printf("iface found\n");
                 struct sr_arphdr reply;
                 reply.ar_op = htons(ARP_REPLY);
-                reply.ar_sip = htons(iface->ip);//sender ip(us)
-                reply.ar_tip = htons(a_hdr->ar_sip);//target ip(from a_hdr)
+                reply.ar_sip = (iface->ip);//sender ip(us)
+                reply.ar_tip = (a_hdr->ar_sip);//target ip(from a_hdr)
                 memcpy(reply.ar_tha, a_hdr->ar_sha, 6);//target hardware address(a_hdr)
                 memcpy(reply.ar_sha, iface->addr, 6); //sender hardware address(us) 
                 reply.ar_hrd = htons(1);//hardware address format Ethernet?
                 reply.ar_pro = htons(0x08);//protocal address format IP?
-                reply.ar_hln = htons(06);//length of hardware address Ethernet? Shiv said make it 06
-                reply.ar_pln = htons(04);//length of protocal address IP? Shiv said make it 04
+                reply.ar_hln = 06;//length of hardware address Ethernet? Shiv said make it 06
+                reply.ar_pln = 04;//length of protocal address IP? Shiv said make it 04
                 sr_send_packet(sr, (uint8_t*)&reply, sizeof(reply), interface);
             }
             
