@@ -95,7 +95,10 @@ void sr_handlepacket(struct sr_instance* sr,
             printf("Arp request\n");
             struct sr_if* iface = sr_get_interface(sr, interface);
             if(iface)//Found
-            {
+            {   
+                //should verify lengths of numerical values to make sure we use either htonl vs. htons 
+                //htons for 2 byte numbers, htonl for 4 bytes numbers, refer to header specs for this
+                
                 printf("iface found\n");
                 struct sr_arphdr reply;
                 reply.ar_op = htons(ARP_REPLY);
