@@ -100,7 +100,7 @@ void sr_handlepacket(struct sr_instance* sr,
                 //htons for 2 byte numbers, htonl for 4 bytes numbers, refer to header specs for this
                 
                 printf("iface found\n");
-                struct sr_arphdr reply;
+                struct sr_arphdr areply;
                 reply.ar_op = htons(ARP_REPLY);
                 reply.ar_sip = (iface->ip);//sender ip(us)
                 reply.ar_tip = (a_hdr->ar_sip);//target ip(from a_hdr)
@@ -108,8 +108,8 @@ void sr_handlepacket(struct sr_instance* sr,
                 memcpy(reply.ar_sha, iface->addr, 6); //sender hardware address(us) 
                 reply.ar_hrd = htons(1);//hardware address format Ethernet?
                 reply.ar_pro = htons(0x08);//protocal address format IP?
-                reply.ar_hln = 06;//length of hardware address Ethernet? Shiv said make it 06
-                reply.ar_pln = 04;//length of protocal address IP? Shiv said make it 04
+                reply.ar_hln = (unsigned char) 06;//length of hardware address Ethernet? Shiv said make it 06
+                reply.ar_pln = (unsigned char) 04;//length of protocal address IP? Shiv said make it 04
                 sr_send_packet(sr, (uint8_t*)&reply, sizeof(reply), interface);
             }
             
