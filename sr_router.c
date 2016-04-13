@@ -87,30 +87,41 @@ void sr_handlepacket(struct sr_instance* sr,
         * TO THE TABLE.  IF IN THE TABLE SEND CORRESPONDING MAC, RESET TTL
         * OPTIONALLY ADD SENDER TO TABLE
         */
-        printf("ARP Packet\n");
+
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
         printf("%d\n", ntohs(a_hdr->ar_op));
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
-            printf("Arp request\n");
             struct sr_if* iface = sr_get_interface(sr, interface);
             if(iface)//Found
             {   
                 //should verify lengths of numerical values to make sure we use either htonl vs. htons 
                 //htons for 2 byte numbers, htonl for 4 bytes numbers, refer to header specs for this
-                
-                printf("iface found\n");
                 struct sr_arphdr areply;
-                reply.ar_op = htons(ARP_REPLY);
-                reply.ar_sip = (iface->ip);//sender ip(us)
-                reply.ar_tip = (a_hdr->ar_sip);//target ip(from a_hdr)
-                memcpy(reply.ar_tha, a_hdr->ar_sha, 6);//target hardware address(a_hdr)
-                memcpy(reply.ar_sha, iface->addr, 6); //sender hardware address(us) 
-                reply.ar_hrd = htons(1);//hardware address format Ethernet?
-                reply.ar_pro = htons(0x08);//protocal address format IP?
-                reply.ar_hln = (unsigned char) 06;//length of hardware address Ethernet? Shiv said make it 06
-                reply.ar_pln = (unsigned char) 04;//length of protocal address IP? Shiv said make it 04
-                sr_send_packet(sr, (uint8_t*)&reply, sizeof(reply), interface);
+                areply.ar_op = htons(ARP_REPLY);
+                areply.ar_sip = (iface->ip);//sender ip(us)
+                areply.ar_tip = (a_hdr->ar_sip);//target ip(from a_hdr)
+                memcpy(areply.ar_tha, a_hdr->ar_sha, 6);//target hardware address(a_hdr)
+                memcpy(areply.ar_sha, iface->addr, 6); //sender hardware address(us) 
+                areply.ar_hrd = htons(1);//hardware address format Ethernet?
+                areply.ar_pro = htons(ETHERTYPE_IP);//protocal address format IP?
+                areply.ar_hln = (unsigned char)(06);//length of hardware address Ethernet? Shiv said make it 06
+                areply.ar_pln = (unsigned char)(04);//length of protocal address IP? Shiv said make it 04
+
+                //Create Ethernet Header
+                struct sr_ethernet_hdr ereply;
+                memcpy(ereply.ether_dhost, a_hdr->ar_sha, 6);
+                memcpy(ereply.ether_shost, iface->addr, 6);
+                ereply.ether_type = htons(ETHERTYPE_ARP);
+
+                //Create packet buffer
+                unsigned int length = (sizeof(ereply) + sizeof(areply));
+                uint8_t reply[length];
+                memcpy(reply, &ereply, sizeof(struct sr_ethernet_hdr));
+                memcpy((reply + sizeof(ereply)), &areply, sizeof(struct sr_arphdr));
+                
+                //Send Arp Reply
+                sr_send_packet(sr, reply, length, interface);
             }
             
         }
