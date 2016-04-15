@@ -126,6 +126,18 @@ void sr_handlepacket(struct sr_instance* sr,
             
         }
         
+        /********************************************************************
+        *When do we want to send to next hop? In this method?
+            Yes, check IP packet, if not for us send to next hop
+        *Arp Cache, what is it how do we create it, when do we update it
+            Linked list, 
+        *How do we do the timing, sleep?
+            Get time of day or whatever we did in milestone 3
+        *Add check of packet = ip then do some stuff
+        *If no ethernet address in table(routing table), send an arp request,
+        *process the reply, I guess add the reply to the table.
+        *
+        *********************************************************************/
 
     }
     
