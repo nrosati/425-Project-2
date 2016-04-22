@@ -13,13 +13,22 @@
 
 #include <stdio.h>
 #include <assert.h>
-
+#include <stdlib.h>
 #include <string.h>
 #include "sr_if.h"
 #include "sr_rt.h"
 #include "sr_router.h"
 #include "sr_protocol.h"
 
+struct node{
+  unsigned char ha[ETHER_ADDR_LEN];
+  time_t ttl;
+  struct node *next;
+  int dead;
+};
+
+struct node *root;
+//root = malloc(sizeof(struct node)); 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
  * Scope:  Global
@@ -34,10 +43,15 @@ void sr_init(struct sr_instance* sr)
     assert(sr);
 
     /* Add initialization code here! */
+      //Add linked list root and conductor here?
+    root = malloc(sizeof(struct node));
+    root->dead = 1;
+    root->ttl = -1;
 
 } /* -- sr_init -- */
 
-
+void addList(struct node * toAdd);
+void cleanList();
 
 /*---------------------------------------------------------------------
  * Method: sr_handlepacket(uint8_t* p,char* interface)
@@ -90,7 +104,7 @@ void sr_handlepacket(struct sr_instance* sr,
         */
 
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
-        printf("%d\n", ntohs(a_hdr->ar_op));
+        //printf("%d\n", ntohs(a_hdr->ar_op));
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
             struct sr_if* iface = sr_get_interface(sr, interface);
@@ -129,6 +143,20 @@ void sr_handlepacket(struct sr_instance* sr,
           // sent an ARP_REQUEST to resolve nexthop Ethernet address for the IP
           // parse ARP_REPLY for Ethernet address, add to linked list
           // w/ gettimeofday info for TTL in cache (15 sec)
+
+          //I think we want sender hardware address from the packet
+           
+           //So our linked list, is it a global?
+           struct timeval tv;
+           struct node *next;
+           next = (struct node *) malloc(sizeof(struct node));
+           memcpy(next->ha, a_hdr->ar_sha, 6);
+           gettimeofday(&tv, NULL);
+           next->ttl = tv.tv_sec;
+           next->next = 0;
+           next->dead = 0;
+           addList(next);
+           cleanList();
         }
 
 
@@ -184,3 +212,41 @@ void sr_handlepacket(struct sr_instance* sr,
  * Method:
  *
  *---------------------------------------------------------------------*/
+ void addList(struct node * toAdd)
+ {
+    struct node *temp = root;
+    while(temp->next)
+    {
+      temp = temp->next;
+    }
+    temp->next = toAdd;
+ }
+
+ void cleanList()
+ {
+    struct node *temp = root;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    time_t life = tv.tv_sec;
+    while(temp->next)
+    {
+      int dif = life - temp->ttl;
+      if(dif >= 15)
+      {
+        temp->dead = 0;
+      }
+    }
+    temp = root;
+    int flag = 0;
+    while(temp->next)
+    {
+      if(temp->next->dead == 0)
+      {
+        temp->next = temp->next->next;
+        free(temp->next);
+        flag = 1;
+      }
+    }
+    if(flag)
+      cleanList();
+ }
