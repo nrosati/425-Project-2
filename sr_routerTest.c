@@ -29,6 +29,7 @@ struct node{
 };
 
 struct node *root;
+uint8_t queue[10][(sizeof(struct sr_ethernet_hdr) + sizeof(struct ip))];
 //root = malloc(sizeof(struct node));
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -48,6 +49,7 @@ void sr_init(struct sr_instance* sr)
     root = malloc(sizeof(struct node));
     root->alive = 1;
     root->ttl = -1;
+    
 
 } /* -- sr_init -- */
 
@@ -158,6 +160,18 @@ void sr_handlepacket(struct sr_instance* sr,
            addList(next);
            cleanList();
            //Loop through our queue of packets see if we can send any
+           for(int i = 0; i < 10; i++)
+           {
+            //this packet may not be the same size of an IP packet
+            struct ip * ipq = 0;
+            ipq = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
+            if(a_hdr->ar_sip == ipq->ip_dst.s_addr)
+            {
+              //Send the dam thing
+              unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
+              sr_send_packet(sr, queue[i], qlen, interface);
+            } 
+           }
         }
 
 
