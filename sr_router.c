@@ -28,7 +28,7 @@ struct node{
 };
 
 struct node *root;
-//root = malloc(sizeof(struct node)); 
+//root = malloc(sizeof(struct node));
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
  * Scope:  Global
@@ -52,7 +52,7 @@ void sr_init(struct sr_instance* sr)
 
 void addList(struct node * toAdd);
 void cleanList();
-
+u_short cksum(u_short *buf, int count);
 /*---------------------------------------------------------------------
  * Method: sr_handlepacket(uint8_t* p,char* interface)
  * Scope:  Global
@@ -145,7 +145,7 @@ void sr_handlepacket(struct sr_instance* sr,
           // w/ gettimeofday info for TTL in cache (15 sec)
 
           //I think we want sender hardware address from the packet
-           
+
            //So our linked list, is it a global?
            struct timeval tv;
            struct node *next;
@@ -250,3 +250,23 @@ void sr_handlepacket(struct sr_instance* sr,
     if(flag)
       cleanList();
  }
+
+//IP Internet Checksum algorithm from book, copied here
+//takes buffer of all data (in 16 bit words), with count
+//of 16 bit words in count, returns u_short of the sum
+u_short cksum(u_short *buf, int count)
+{
+  register u_long sum = 0;
+  while(count--)
+  {
+    sum += *buf++;
+    if(sum & 0xFFFF0000)
+    {
+      /*carry occurred, so wrap around */
+      sum &= 0xFFFF;
+      sum++;
+    }
+  }
+  return ~(sum&0xFFFF);
+
+}
