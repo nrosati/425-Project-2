@@ -157,6 +157,7 @@ void sr_handlepacket(struct sr_instance* sr,
            next->ip = a_hdr->ar_sip;
            addList(next);
            cleanList();
+           //Loop through our queue of packets see if we can send any
         }
 
 
@@ -164,6 +165,7 @@ void sr_handlepacket(struct sr_instance* sr,
       //handle IP packet:
           //if dest address is itself
               //discard packet, DONE
+        //go through cache refresh any ttl if found
         if(memcmp(e_hdr->ether_dhost, iface->addr, 6))
         {
           //Do nothing?
@@ -174,6 +176,7 @@ void sr_handlepacket(struct sr_instance* sr,
         {
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
+
 
           ip_packet->ip_ttl--;
           if(ip_packet->ip_ttl == 0)//If TTL = 0 
@@ -248,9 +251,11 @@ void sr_handlepacket(struct sr_instance* sr,
           
           temp = root;
           /**********************
-            Sticking point here, so if we dont find the ha in the cache we send out the request,
-            but then the whole handle packet has to run again before it is added to the cache?
-            So how is that gonna work
+            if we have to send out the arp request we need to queue the packet
+            Im thinking use the compare flag, if its been set to one set the 
+            hardware addresses, then outside the if fill in the rest of the packet
+            then use it again if its been set send the packet if it hasnt queue it
+            queue will probably have to be a global 
           **********************/
          if(!compare)//ha is set when we find it in cache, if not we have to set it here
          {
