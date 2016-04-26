@@ -45,7 +45,7 @@ void sr_init(struct sr_instance* sr)
     assert(sr);
 
     /* Add initialization code here! */
-      //Add linked list root and conductor here?
+    
     root = malloc(sizeof(struct node));
     root->alive = 1;
     root->ttl = -1;
@@ -56,7 +56,7 @@ void sr_init(struct sr_instance* sr)
 void addList(struct node * toAdd);
 void cleanList();
 u_short cksum(u_short *buf, int count);
-void refreshList(in_addr_t ip);
+void refreshList(in_addr_t ip, uint8_t ha[6]);
 /*---------------------------------------------------------------------
  * Method: sr_handlepacket(uint8_t* p,char* interface)
  * Scope:  Global
@@ -109,7 +109,7 @@ void sr_handlepacket(struct sr_instance* sr,
 
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
         //printf("%d\n", ntohs(a_hdr->ar_op));
-        refreshList(a_hdr->ar_sip);//Should this be src or dst?
+        refreshList(a_hdr->ar_sip, a_hdr->ar_sha);//Should this be src or dst?
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
             
@@ -195,9 +195,10 @@ void sr_handlepacket(struct sr_instance* sr,
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
 
-          refreshList(ip_packet->ip_src.s_addr);//Should this be the source or dest?
-          ip_packet->ip_ttl--;
-          if(ip_packet->ip_ttl == 0)//If TTL = 0 
+          refreshList(ip_packet->ip_src.s_addr, e_hdr->ether_shost);//Should this be the source or dest?
+          uint8_t ttl = ip_packet->ip_ttl;//ntohs(ip_packet->ip_ttl);
+          ttl--;
+          if(ttl == 0)//If TTL = 0 
           {
             //Do Nothing?
             return;
@@ -276,16 +277,21 @@ void sr_handlepacket(struct sr_instance* sr,
           eforward.ether_type = htons(ETHERTYPE_IP);
           //Build IP packet
           struct ip ipforward;
-          /*
-          ipforward.ip_tos//type of service uint8_t
-          ipforward.ip_len//total length uint16_t
-          ipforward.ip_id//identification uint16_t
-          ipforward.ip_off//fragment offset field uint16_t
-          ipforward.ip_ttl//time to live uint8_t
-          ipforwrad.ip_p//protocol uint8_t
-          ipforward.ip_sum//checksum uint16_t
-          ipforward.ip_dst.s_addr//source address, s_addr is uint32_t inside struct in_addr*/
-          ipforward.ip_src.s_addr = iface->ip;//destination address same as parameters as source
+          
+          //Do we need htons for uint8_t?
+          ipforward.ip_tos = ip_packet->ip_tos;//type of service uint8_t 0 = best beffort
+          ipforward.ip_len = ip_packet->ip_len;//total length uint16_t
+          ipforward.ip_id = ip_packet->ip_id;//identification uint16_t
+          ipforward.ip_off = ip_packet->ip_id;//fragment offset field uint16_t
+          ipforward.ip_ttl = 64;//time to live uint8_t
+          ipforward.ip_p = ip_packet->ip_p;//protocol uint8_t 6 = tcp
+
+          /***************Set this to the checksum we did earlier***********/
+          //ipforward.ip_sum//checksum uint16_t
+          /**********Error possible here with IP struct*****************/
+          
+          ipforward.ip_dst.s_addr = sendIP.s_addr;//destination address, s_addr is uint32_t inside struct in_addr
+          ipforward.ip_src.s_addr = iface->ip;//source address same as parameters as destination
 
           
           //Create packet buffer
@@ -366,7 +372,7 @@ void sr_handlepacket(struct sr_instance* sr,
       temp->next = toAdd;
  }
 
- void refreshList(in_addr_t ip)
+ void refreshList(in_addr_t ip, uint8_t ha[6])
  {
   struct node *temp = root;
   struct timeval tv;
@@ -376,7 +382,8 @@ void sr_handlepacket(struct sr_instance* sr,
   {
       if(temp->ip == ip)
       {
-        temp->ttl = life;
+        if(memcmp(temp->ha, ha, 6))
+          temp->ttl = life;
       }
   }
  }
