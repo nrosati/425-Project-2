@@ -29,7 +29,7 @@ struct node{
 };
 
 struct node *root;
-uint8_t queue[10][(sizeof(struct sr_ethernet_hdr) + sizeof(struct ip))];
+uint8_t **queue;
 //root = malloc(sizeof(struct node));
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -49,7 +49,7 @@ void sr_init(struct sr_instance* sr)
     root = malloc(sizeof(struct node));
     root->alive = 1;
     root->ttl = -1;
-    
+    queue = malloc(10 * sizeof(uint8_t *));//My 2d C arrays are rusty but I think this works?
 
 } /* -- sr_init -- */
 
@@ -109,7 +109,7 @@ void sr_handlepacket(struct sr_instance* sr,
 
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
         //printf("%d\n", ntohs(a_hdr->ar_op));
-        refreshList(a_hdr->sip);//Should this be src or dst?
+        refreshList(a_hdr->ar_sip);//Should this be src or dst?
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
             
@@ -195,7 +195,7 @@ void sr_handlepacket(struct sr_instance* sr,
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
 
-          refreshList(ip_packet->ip_dst.s_addr);//Should this be the source or dest?
+          refreshList(ip_packet->ip_src.s_addr);//Should this be the source or dest?
           ip_packet->ip_ttl--;
           if(ip_packet->ip_ttl == 0)//If TTL = 0 
           {
