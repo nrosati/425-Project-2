@@ -287,7 +287,7 @@ void sr_handlepacket(struct sr_instance* sr,
           ipforward.ip_p = ip_packet->ip_p;//protocol uint8_t 6 = tcp
 
           /***************Set this to the checksum we did earlier***********/
-          //ipforward.ip_sum//checksum uint16_t
+          ipforward.ip_sum = ip_packet->ip_sum;//checksum uint16_t
           /**********Error possible here with IP struct*****************/
           
           ipforward.ip_dst.s_addr = sendIP.s_addr;//destination address, s_addr is uint32_t inside struct in_addr
