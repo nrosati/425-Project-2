@@ -56,6 +56,7 @@ void sr_init(struct sr_instance* sr)
 void addList(struct node * toAdd);
 void cleanList();
 u_short cksum(u_short *buf, int count);
+void refreshList(in_addr_t ip);
 /*---------------------------------------------------------------------
  * Method: sr_handlepacket(uint8_t* p,char* interface)
  * Scope:  Global
@@ -108,6 +109,7 @@ void sr_handlepacket(struct sr_instance* sr,
 
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
         //printf("%d\n", ntohs(a_hdr->ar_op));
+        refreshList(a_hdr->sip);//Should this be src or dst?
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
             
@@ -162,15 +164,17 @@ void sr_handlepacket(struct sr_instance* sr,
            //Loop through our queue of packets see if we can send any
            for(int i = 0; i < 10; i++)
            {
-            //this packet may not be the same size of an IP packet
-            struct ip * ipq = 0;
-            ipq = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
-            if(a_hdr->ar_sip == ipq->ip_dst.s_addr)
-            {
-              //Send the dam thing
-              unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
-              sr_send_packet(sr, queue[i], qlen, interface);
-            } 
+              struct ip * ipq = 0;
+              struct sr_ethernet_hdr * qe = 0;
+              ipq = (struct ip*)(queue[i] + sizeof(struct sr_ethernet_hdr));
+              if(a_hdr->ar_sip == ipq->ip_dst.s_addr)
+              {
+                //Send the dam thing
+                qe = (struct sr_ethernet_hdr*)queue[i];
+                memcpy(qe->ether_dhost, a_hdr->ar_sha, 6);
+                unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
+                sr_send_packet(sr, queue[i], qlen, interface);
+              } 
            }
         }
 
@@ -191,7 +195,7 @@ void sr_handlepacket(struct sr_instance* sr,
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
 
-
+          refreshList(ip_packet->ip_dst.s_addr);//Should this be the source or dest?
           ip_packet->ip_ttl--;
           if(ip_packet->ip_ttl == 0)//If TTL = 0 
           {
@@ -212,6 +216,9 @@ void sr_handlepacket(struct sr_instance* sr,
           while(rTemp->next)
           {
             //Find the longest prefix match, get its next hop
+            /************************
+            This isnt right, need to find longest prefix match
+            ************************/
             int c = memcmp(&(ip_packet->ip_dst), &(rTemp->gw), sizeof(struct in_addr));
             if(c > compare)
             {
@@ -263,25 +270,8 @@ void sr_handlepacket(struct sr_instance* sr,
           //do ARP cache management
           cleanList();
           
-          temp = root;
-          /**********************
-            if we have to send out the arp request we need to queue the packet
-            Im thinking use the compare flag, if its been set to one set the 
-            hardware addresses, then outside the if fill in the rest of the packet
-            then use it again if its been set send the packet if it hasnt queue it
-            queue will probably have to be a global 
-          **********************/
-         if(!compare)//ha is set when we find it in cache, if not we have to set it here
-         {
-            while(temp->next)
-            {
-              //sendIP is from a standard system include it is a struct with a typedef of uint32_t
-              if(memcmp(&sendIP.s_addr, &temp->ip, sizeof(uint32_t)))//== didnt want to work
-              {
-                memcpy(eforward.ether_dhost, temp->ha, 6);
-              }
-            }
-         }
+          //temp = root;
+       
           memcpy(eforward.ether_shost, iface->addr, 6);
           eforward.ether_type = htons(ETHERTYPE_IP);
           //Build IP packet
@@ -294,8 +284,8 @@ void sr_handlepacket(struct sr_instance* sr,
           ipforward.ip_ttl//time to live uint8_t
           ipforwrad.ip_p//protocol uint8_t
           ipforward.ip_sum//checksum uint16_t
-          ipforward.ip_src.s_addr//source address, s_addr is uint32_t inside struct in_addr*/
-          ipforward.ip_dst.s_addr = iface->ip;//destination address same as parameters as source
+          ipforward.ip_dst.s_addr//source address, s_addr is uint32_t inside struct in_addr*/
+          ipforward.ip_src.s_addr = iface->ip;//destination address same as parameters as source
 
           
           //Create packet buffer
@@ -304,8 +294,22 @@ void sr_handlepacket(struct sr_instance* sr,
           memcpy(freply, &eforward, sizeof(struct sr_ethernet_hdr));
           memcpy((freply + sizeof(eforward)), &ipforward, sizeof(struct ip));
 
-          //Send to next hope and DONE
-          sr_send_packet(sr, freply, flen, interface);
+          if(compare)//If we found it in the cache, ha has been set, ok to send
+          {
+            //Send to next hop and DONE
+            sr_send_packet(sr, freply, flen, interface);
+          }
+          else//If we didnt find ha in cache, add it to queue
+          {
+            for(int j = 0; j < 10; j++)
+            {
+              if(queue[j] == 0)
+              {
+                queue[j] = freply;
+              }
+            }
+          }
+          
         }
 
       
@@ -360,6 +364,21 @@ void sr_handlepacket(struct sr_instance* sr,
     }
     if(flag)//If we didnt find it in our list already add it
       temp->next = toAdd;
+ }
+
+ void refreshList(in_addr_t ip)
+ {
+  struct node *temp = root;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  time_t life = tv.tv_sec;
+  while(temp->next)
+  {
+      if(temp->ip == ip)
+      {
+        temp->ttl = life;
+      }
+  }
  }
 
  void cleanList()
