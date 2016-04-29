@@ -25,11 +25,12 @@ struct node{
   uint32_t ip;
   time_t ttl;
   struct node *next;
+  char * name;
   int alive;//1 = valid 0 = ttl expired
 };
 
 struct node *root;
-uint8_t **queue;
+struct ip queue[10];
 //root = malloc(sizeof(struct node));
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -50,16 +51,11 @@ void sr_init(struct sr_instance* sr)
     root->alive = 1;
     root->ttl = 100;
     root->next = 0;
-    queue = malloc(10 * sizeof(uint8_t *));//My 2d C arrays are rusty but I think this works?
-    int j;
-    for(j = 0; j < 10; j++)
-    {
-      queue[j] = 0;
-    }
+    bzero(queue, (10 * sizeof(struct ip)));
 
 } /* -- sr_init -- */
 
-void addList(uint8_t *ha, uint32_t ip);
+void addList(uint8_t *ha, uint32_t ip, char * interface);
 void cleanList();
 u_short cksum(u_short *buf, int count);
 void refreshList(in_addr_t ip, uint8_t ha[6]);
@@ -116,7 +112,7 @@ void sr_handlepacket(struct sr_instance* sr,
         a_hdr = (struct sr_arphdr*)(packet + sizeof(struct sr_ethernet_hdr));
         //printf("%d\n", ntohs(a_hdr->ar_op));
         printf("Arp recieved\n");
-        addList(a_hdr->ar_sha, a_hdr->ar_sip);
+        addList(a_hdr->ar_sha, a_hdr->ar_sip, interface);
         //refreshList(a_hdr->ar_sip, a_hdr->ar_sha);//Should this be src or dst?
         if(a_hdr->ar_op == htons(ARP_REQUEST))
         {
@@ -163,23 +159,36 @@ void sr_handlepacket(struct sr_instance* sr,
            //addList(a_hdr->ar_sha, a_hdr->ar_sip);
            cleanList();
            //Loop through our queue of packets see if we can send any
-          struct ip * ipq = 0;
-          struct sr_ethernet_hdr * qe = 0;
+          struct ip ipq;
+          struct sr_ethernet_hdr qe;
            for(int i = 0; i < 10; i++)
            {
-              if(queue[i] != 0)
+              if(&queue[i] != 0)
               {
-                 ipq = (struct ip*)(queue[i] + sizeof(struct sr_ethernet_hdr));
+                
+                ipq = queue[i]; 
                 //printf("looking in queue");
-                printf("arp ip: %lu\n ip ip: %lu\n", (unsigned long)a_hdr->ar_sip, (unsigned long)ipq->ip_dst.s_addr);
-                if(a_hdr->ar_sip == ipq->ip_dst.s_addr)
+                //printf("arp ip: %lu\n ip ip: %lu\n", (unsigned long)a_hdr->ar_sip, (unsigned long)ipq->ip_dst.s_addr);
+                if(a_hdr->ar_sip == ipq.ip_dst.s_addr);
                 {
-                  printf("Sending From Queue\n");
-                  qe = (struct sr_ethernet_hdr*)queue[i];
-                  memcpy(qe->ether_dhost, a_hdr->ar_sha, 6);
+                  printf("Building ether packet for queue\n");
+                  memcpy(qe.ether_shost, iface->addr, 6);
+                  //printf("1\n");
+                  memcpy(qe.ether_dhost, a_hdr->ar_sha, 6);
+                  //printf("2\n");
+                  qe.ether_type = htons(ETHERTYPE_IP);
+                 //printf("3\n");
                   unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
-                  sr_send_packet(sr, queue[i], qlen, interface);
-                  queue[i] = 0;
+                  //printf("4\n");
+                  uint8_t qpack[qlen];
+                  //printf("5\n");
+                  memcpy(qpack, &qe, sizeof(struct sr_ethernet_hdr));
+                  //printf("6\n");
+                  memcpy((qpack + sizeof(struct sr_ethernet_hdr)), &ipq, sizeof(struct ip));
+                  printf("Sending packet from queue\n");
+                  sr_send_packet(sr, qpack, qlen, interface);
+                  //printf("7\n");
+                  bzero(&queue[i], sizeof(struct ip));
                 } 
 
               }
@@ -205,7 +214,7 @@ void sr_handlepacket(struct sr_instance* sr,
         {
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
-          addList(e_hdr->ether_shost, ip_packet->ip_src.s_addr);
+          addList(e_hdr->ether_shost, ip_packet->ip_src.s_addr, interface);
           //refreshList(ip_packet->ip_src.s_addr, e_hdr->ether_shost);//Should this be the source or dest?
           uint8_t ttl = ip_packet->ip_ttl;//ntohs(ip_packet->ip_ttl);
           ttl--;
@@ -318,9 +327,9 @@ void sr_handlepacket(struct sr_instance* sr,
             arpReq.ar_hln = (unsigned char)(06);
             arpReq.ar_pln = (unsigned char)(04);
             arpReq.ar_op = htons(ARP_REQUEST);
-            memcpy(arpReq.ar_sha, iface->addr, 6);
+            memcpy(arpReq.ar_sha, oface->addr, 6);
             memset(arpReq.ar_tha, 0x0000, 6 * sizeof(arpReq.ar_tha[0]));//Target all 0s from BZhang
-            arpReq.ar_sip = iface->ip;
+            arpReq.ar_sip = oface->ip;
 
             printf("Send iP = %lu\n", (unsigned long) sendIP.s_addr);
             arpReq.ar_tip = ip_packet->ip_dst.s_addr;
@@ -355,11 +364,11 @@ void sr_handlepacket(struct sr_instance* sr,
           /**********Error possible here with IP struct*****************/
           
           ipforward.ip_dst.s_addr = sendIP.s_addr;//destination address, s_addr is uint32_t inside struct in_addr
-          ipforward.ip_src.s_addr = iface->ip;//source address same as parameters as destination
+          ipforward.ip_src.s_addr = oface->ip;//source address same as parameters as destination
 
           
           //Create packet buffer
-          unsigned int flen = (sizeof(eforward) + sizeof(ipforward));
+          unsigned int flen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
           uint8_t freply[flen];
           memcpy(freply, &eforward, sizeof(struct sr_ethernet_hdr));
           memcpy((freply + sizeof(eforward)), &ipforward, sizeof(struct ip));
@@ -375,9 +384,9 @@ void sr_handlepacket(struct sr_instance* sr,
             printf("Not in cache, adding to queue\n");
             for(int j = 0; j < 10; j++)
             {
-              if(queue[j] == 0)
+              if(&queue[j] == 0)
               {
-                queue[j] = freply;
+                queue[j] = ipforward;
                 break;
               }
             }
@@ -417,7 +426,7 @@ void sr_handlepacket(struct sr_instance* sr,
  * Method:
  *
  *---------------------------------------------------------------------*/
- void addList(uint8_t *ha, uint32_t ip)
+ void addList(uint8_t *ha, uint32_t ip, char * inteface)
  {
   printf("Running add list\n");
     struct node *temp = root;
@@ -455,31 +464,12 @@ void sr_handlepacket(struct sr_instance* sr,
       next->next = 0;
       next->alive = 1;
       next->ip = ip;
+      next->name = inteface;
       temp->next = next;
       printf("Packet added to cache\n");
     }
  }
 
- void refreshList(in_addr_t ip, uint8_t ha[6])
- {
-  printf("Running refresh list\n");
-  struct node *temp = root;
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  time_t life = tv.tv_sec;
-  while(temp)
-  {
-    printf("refreshList loop\n");
-      if(temp->ip == ip)
-      {
-        if(memcmp(temp->ha, ha, 6) == 0){
-          temp->ttl = life;
-          printf("Refreshing packet\n");
-        }
-      }
-      temp = temp->next;
-  }
- }
 
  void cleanList()
  {
@@ -499,19 +489,7 @@ void sr_handlepacket(struct sr_instance* sr,
       }
       temp = temp->next;
     }
-    /*temp = root;
-    int flag = 0;
-    while(temp->next)
-    {
-      if(temp->next->alive == 0)
-      {
-        temp->next = temp->next->next;
-        free(temp->next);
-        flag = 1;
-      }
-    }
-    if(flag)
-      cleanList();*/
+  
  }
 
 //IP Internet Checksum algorithm from book, copied here
