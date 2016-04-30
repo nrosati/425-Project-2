@@ -118,7 +118,7 @@ void sr_handlepacket(struct sr_instance* sr,
         printf("Arp recieved\n");
         struct in_addr temp;
         temp.s_addr = a_hdr->ar_sip;
-        printf("ARP sIP: %s\t\t", inet_ntoa(temp));
+        //printf("ARP sIP: %s\t\t", inet_ntoa(temp));
         addList(a_hdr->ar_sha, temp, interface);
         //refreshList(a_hdr->ar_sip, a_hdr->ar_sha);//Should this be src or dst?
         if(a_hdr->ar_op == htons(ARP_REQUEST))
@@ -184,8 +184,8 @@ void sr_handlepacket(struct sr_instance* sr,
                   //printf("2\n");
                   qe.ether_type = htons(ETHERTYPE_IP);
                  //printf("3\n");
-                  unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
-                  //printf("4\n");
+                  unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + ntohs(queue[i].ip_len));
+                  printf("Qlen: %d\n", qlen);
                   uint8_t qpack[qlen];
                   //printf("5\n");
                   memcpy(qpack, &qe, sizeof(struct sr_ethernet_hdr));
@@ -222,9 +222,9 @@ void sr_handlepacket(struct sr_instance* sr,
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
           addList(e_hdr->ether_shost, ip_packet->ip_src, interface);
           //refreshList(ip_packet->ip_src.s_addr, e_hdr->ether_shost);//Should this be the source or dest?
-          uint8_t ttl = ip_packet->ip_ttl;//ntohs(ip_packet->ip_ttl);
-          ttl--;
-          if(ttl == 0)//If TTL = 0 
+          ip_packet->ip_ttl--;//ntohs(ip_packet->ip_ttl);
+          
+          if(ip_packet->ip_ttl == 0)//If TTL = 0 
           {
             printf("Packet TTL = 0 returning\n");
             return;
@@ -302,19 +302,31 @@ void sr_handlepacket(struct sr_instance* sr,
           }
           //Check ARP cache for Ethernet of nexthop
           struct node *temp = root;
+          compare = (int)sendIP.s_addr;//just to get rid of compile warning
           compare = 0;//repurpose as a flag
           while(temp)
           {
             printf("Looking up arp cache\n");
             //sendIP is from a standard system include it is a struct with a typedef of uint32_t
-            printf("Packet ip: %s\t\t\n", inet_ntoa(ip_packet->ip_dst));
+            //printf("Packet ip: %s\t\t\n", inet_ntoa(ip_packet->ip_dst));
             //struct in_addr cacheIP;
             //cacheIP.s_addr = temp->ip;
-            printf("Cache ip: %s\t\t\n", inet_ntoa(temp->ip));
+            //printf("Cache ip: %s\t\t\n", inet_ntoa(temp->ip));
             if(memcmp(&temp->ip, &ip_packet->ip_dst.s_addr, sizeof(uint32_t)) == 0)//== didnt want to work
             {
-              printf("Found entry in Arp Cache setting ha\n");
+              printf("Found entry in Arp Cache\n");
               memcpy(eforward.ether_dhost, temp->ha, 6);
+              memcpy(eforward.ether_shost, oface->addr, 6);//Umm might be oface->addr
+              eforward.ether_type = htons(ETHERTYPE_IP);
+              //TTL has been decremented, checksum should be to
+              //So just send it
+              unsigned int flen = (sizeof(struct sr_ethernet_hdr) + ntohs(ip_packet->ip_len));
+              printf("Size of flen: %d\n", flen);
+              uint8_t freply[flen];
+              memcpy(freply, &eforward, sizeof(struct sr_ethernet_hdr));
+              memcpy((freply + sizeof(eforward)), ip_packet, sizeof(struct ip));
+              printf("HA found in cache, forwarding packet\n");
+              sr_send_packet(sr, freply, flen, oface->name);
               compare = 1;
               break;
             }
@@ -341,7 +353,7 @@ void sr_handlepacket(struct sr_instance* sr,
             memset(arpReq.ar_tha, 0x0000, 6 * sizeof(arpReq.ar_tha[0]));//Target all 0s from BZhang
             arpReq.ar_sip = oface->ip;
 
-            printf("Send iP = %lu\n", (unsigned long) sendIP.s_addr);
+            //printf("Send iP = %lu\n", (unsigned long) sendIP.s_addr);
             arpReq.ar_tip = ip_packet->ip_dst.s_addr;
             unsigned int plen = (sizeof(erequest) + sizeof(arpReq));
             uint8_t req[plen];
@@ -358,39 +370,8 @@ void sr_handlepacket(struct sr_instance* sr,
 
           if(compare)//If we found it in the cache, ha has been set, ok to send
           {
-            //Send to next hop and DONE
-            printf("HA found in cache, sending packet\n");
-            memcpy(eforward.ether_shost, oface->addr, 6);//Umm might be oface->addr
-            eforward.ether_type = htons(ETHERTYPE_IP);
-            //Build IP packet
-            struct ip ipforward;
-            printf("Building IP packet\n");
-            //Do we need htons for uint8_t?
-          
-            ipforward.ip_tos = ip_packet->ip_tos;//type of service uint8_t 0 = best beffort
-            ipforward.ip_len = ip_packet->ip_len;//total length uint16_t
-            ipforward.ip_id = ip_packet->ip_id;//identification uint16_t
-            ipforward.ip_off = ip_packet->ip_id;//fragment offset field uint16_t
-            ipforward.ip_ttl = 64;//time to live uint8_t
-            ipforward.ip_p = ip_packet->ip_p;//protocol uint8_t 6 = tcp
-
-          /***************Set this to the checksum we did earlier***********/
-            ipforward.ip_sum = ip_packet->ip_sum;//checksum uint16_t
-          
-            ipforward.ip_dst= ip_packet->ip_dst;//sendIP.s_addr;//destination address, s_addr is uint32_t inside struct in_addr
-            /*
-              struct in_addr temp;
-              temp.s_addr = oface->ip;
-              ipforward.ip_src = temp;
-            */
-            ipforward.ip_src.s_addr = oface->ip;//source address same as parameters as destination
-          
-            //Create packet buffer
-            unsigned int flen = (sizeof(struct sr_ethernet_hdr) + sizeof(struct ip));
-            uint8_t freply[flen];
-            memcpy(freply, &eforward, sizeof(struct sr_ethernet_hdr));
-            memcpy((freply + sizeof(eforward)), &ipforward, sizeof(struct ip));
-            sr_send_packet(sr, freply, flen, oface->name);
+            return;
+            
           }
           else//If we didnt find ha in cache, add it to queue
           {
@@ -403,8 +384,8 @@ void sr_handlepacket(struct sr_instance* sr,
                 queue[j].ip_tos = ip_packet->ip_tos;//type of service uint8_t 0 = best beffort
                 queue[j].ip_len = ip_packet->ip_len;//total length uint16_t
                 queue[j].ip_id = ip_packet->ip_id;//identification uint16_t
-                queue[j].ip_off = ip_packet->ip_id;//fragment offset field uint16_t
-                queue[j].ip_ttl = 64;//time to live uint8_t
+                queue[j].ip_off = ip_packet->ip_off;//fragment offset field uint16_t
+                queue[j].ip_ttl = ip_packet->ip_ttl;//time to live uint8_t
                 queue[j].ip_p = ip_packet->ip_p;//protocol uint8_t 6 = tcp
                 queue[j].ip_sum = ip_packet->ip_sum;
                 queue[j].ip_dst.s_addr = ip_packet->ip_dst.s_addr;
@@ -458,7 +439,7 @@ void sr_handlepacket(struct sr_instance* sr,
     int flag = 1;
     
     //printf("iMAC: %02x:%02x:%02x:%02x:%02x:%02x\n", ha[0], ha[1], ha[2], ha[3], ha[4], ha[5]);
-    printf("AddList IP: %s\t\t\n", inet_ntoa(ip));
+    //printf("AddList IP: %s\t\t\n", inet_ntoa(ip));
     while(temp)
     {
       //If its in our list, but marked dead reset ttl, bring back to life
@@ -486,7 +467,7 @@ void sr_handlepacket(struct sr_instance* sr,
       next->next = 0;
       next->alive = 1;
       memcpy(&next->ip, &ip, sizeof(struct in_addr));
-      printf("Node IP: %s\t\t\n", inet_ntoa(next->ip));
+      //printf("Node IP: %s\t\t\n", inet_ntoa(next->ip));
       next->name = inteface;
       temp->next = next;
       printf("Packet added to cache\n");
