@@ -29,8 +29,13 @@ struct node{
   int alive;//1 = valid 0 = ttl expired
 };
 
+struct fullIP
+{
+  struct ip header;//Header
+  unsigned char data[1500];//Block of memeory for payload data
+};
 struct node *root;
-struct ip queue[10];
+struct fullIP queue[10];
 //root = malloc(sizeof(struct node));
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -54,7 +59,7 @@ void sr_init(struct sr_instance* sr)
     int i;
     for(i = 0; i < 10; i++)
     {
-      queue[i].ip_ttl = 0;
+      queue[i].header.ip_ttl = 0;
     }
 
 } /* -- sr_init -- */
@@ -171,11 +176,11 @@ void sr_handlepacket(struct sr_instance* sr,
            int i; 
            for(i = 0; i < 10; i++)
            {
-              if(queue[i].ip_ttl != 0)
+              if(queue[i].header.ip_ttl != 0)
               {
                 printf("looking in queue\n");
                 //printf("arp ip: %lu\n ip ip: %lu\n", (unsigned long)a_hdr->ar_sip, (unsigned long)ipq->ip_dst.s_addr);
-                if(a_hdr->ar_sip == queue[i].ip_dst.s_addr);
+                if(a_hdr->ar_sip == queue[i].header.ip_dst.s_addr);
                 {
                   printf("Building ether packet for queue\n");
                   memcpy(qe.ether_shost, iface->addr, 6);
@@ -184,17 +189,17 @@ void sr_handlepacket(struct sr_instance* sr,
                   //printf("2\n");
                   qe.ether_type = htons(ETHERTYPE_IP);
                  //printf("3\n");
-                  unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + ntohs(queue[i].ip_len));
+                  unsigned int qlen = (sizeof(struct sr_ethernet_hdr) + ntohs(queue[i].header.ip_len));
                   printf("Qlen: %d\n", qlen);
                   uint8_t qpack[qlen];
                   //printf("5\n");
                   memcpy(qpack, &qe, sizeof(struct sr_ethernet_hdr));
                   //printf("6\n");
-                  memcpy((qpack + sizeof(struct sr_ethernet_hdr)), &queue[i], sizeof(struct ip));
+                  memcpy((qpack + sizeof(struct sr_ethernet_hdr)), &queue[i], ntohs(queue[i].header.ip_len));
                   printf("Sending packet from queue\n");
                   sr_send_packet(sr, qpack, qlen, interface);
                   //printf("7\n");
-                  queue[i].ip_ttl = 0;
+                  queue[i].header.ip_ttl = 0;
                 } 
 
               }
@@ -219,11 +224,16 @@ void sr_handlepacket(struct sr_instance* sr,
         else
         {
           ip_packet = (struct ip*)(packet + sizeof(struct sr_ethernet_hdr));
+          //const unsigned char *data = 
+          //printf("Size of packet recieved: %lu\n", sizeof(*ip_packet));
+          //printf("Size of ip Struct: %lu\n", sizeof(struct ip));
           struct sr_ethernet_hdr eforward;//Ethernet header for forwarding packet
           addList(e_hdr->ether_shost, ip_packet->ip_src, interface);
           //refreshList(ip_packet->ip_src.s_addr, e_hdr->ether_shost);//Should this be the source or dest?
-          ip_packet->ip_ttl--;//ntohs(ip_packet->ip_ttl);
-          
+
+          /*********Gotta un comment this the TTL**************/
+          //ip_packet->ip_ttl--;//ntohs(ip_packet->ip_ttl);
+          //printf("Memory Check: %x", (char)*(ip_packet+20));
           if(ip_packet->ip_ttl == 0)//If TTL = 0 
           {
             printf("Packet TTL = 0 returning\n");
@@ -232,9 +242,27 @@ void sr_handlepacket(struct sr_instance* sr,
           else
           {
             printf("Checksum running\n");
-            //Update checksum w/ IP Checksum algo. (see textbook p95)
             //IP CHECKSUM FOUND in ip_sum (uint16_t), TTL in ip_ttl (uint8_t)
             //source + dest addr in (struct in_addr) ip_src, ip_dst
+
+            //split ip header values into u_short array
+            unsigned int hlen = ip_packet->ip_hl;
+            u_short words[2*hlen];//hlen is 32-bit words, making this fit
+            uint16_t zero= 0x0000;
+            //pull out IP header of size given in header
+            memcpy(words,(packet + sizeof(struct sr_ethernet_hdr)),hlen);
+            //set checksum location to 0
+            words[5] = zero; //overwrite 16bit word at index 5
+                            //which is checksum to 0
+            u_short cksumres = cksum(words,hlen*2); //give buffer + # 16b words
+            //ip_packet->ip_sum = cksumres;
+            //compare calculated to what is in IP packet
+            if(cksumres == (u_short)ntohs(ip_packet->ip_sum)){
+              printf("Wow, IP Checksum works");
+
+            }else{
+              printf("IP Checksum calculated doesn't match one included in header...");
+            }
           }
 
           //Look up routing table to find IP of nexthop
@@ -259,8 +287,10 @@ void sr_handlepacket(struct sr_instance* sr,
             //Find the longest prefix match, get its next hop
       
             mask = rTemp->mask.s_addr;
+            //printf("IP Before: %s\t\t\n", inet_ntoa(ip_packet->ip_dst));
             if((ip_packet->ip_dst.s_addr & mask) == (rTemp->dest.s_addr & mask))
             {
+              //printf("After: %s\t\t\n", inet_ntoa(ip_packet->ip_dst));
               if(compare)
               {
                 match2 = rTemp;
@@ -324,7 +354,7 @@ void sr_handlepacket(struct sr_instance* sr,
               printf("Size of flen: %d\n", flen);
               uint8_t freply[flen];
               memcpy(freply, &eforward, sizeof(struct sr_ethernet_hdr));
-              memcpy((freply + sizeof(eforward)), ip_packet, sizeof(struct ip));
+              memcpy((freply + sizeof(eforward)), ip_packet, ntohs(ip_packet->ip_len));
               printf("HA found in cache, forwarding packet\n");
               sr_send_packet(sr, freply, flen, oface->name);
               compare = 1;
@@ -379,17 +409,9 @@ void sr_handlepacket(struct sr_instance* sr,
             int j;
             for(j = 0; j < 10; j++)
             {
-              if(queue[j].ip_ttl == 0)
+              if(queue[j].header.ip_ttl == 0)
               {
-                queue[j].ip_tos = ip_packet->ip_tos;//type of service uint8_t 0 = best beffort
-                queue[j].ip_len = ip_packet->ip_len;//total length uint16_t
-                queue[j].ip_id = ip_packet->ip_id;//identification uint16_t
-                queue[j].ip_off = ip_packet->ip_off;//fragment offset field uint16_t
-                queue[j].ip_ttl = ip_packet->ip_ttl;//time to live uint8_t
-                queue[j].ip_p = ip_packet->ip_p;//protocol uint8_t 6 = tcp
-                queue[j].ip_sum = ip_packet->ip_sum;
-                queue[j].ip_dst.s_addr = ip_packet->ip_dst.s_addr;
-                queue[j].ip_src.s_addr = oface->ip;
+                memcpy(&queue[j], ip_packet, ntohs(ip_packet->ip_len));
                 break;
               }
             }
